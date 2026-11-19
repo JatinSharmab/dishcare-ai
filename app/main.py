@@ -1,16 +1,22 @@
+import asyncio
 import logging
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import (
+    AsyncExitStack,
+    asynccontextmanager,
+)
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.business import router as business_router
+from app.api.chat import router as chat_router
 from app.config import Settings
 from app.core.exceptions import BusinessError
 from app.db.database import Database
 from app.db.seed import seed_database
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,7 @@ def create_app(
             runtime_settings.app_env == "production"
             and runtime_settings.seed_demo_data
         ):
+
             raise RuntimeError(
                 "Demo data must not be enabled in production"
             )
@@ -43,20 +50,101 @@ def create_app(
 
         app.state.settings = runtime_settings
         app.state.db = db
+        app.state.chat_engine = None
 
-        logger.info("DishCare AI initialized")
+        async with AsyncExitStack() as stack:
 
-        yield
+            # Keep Phase 1 automated tests offline.
+            if (
+                runtime_settings.ai_enabled
+                and runtime_settings.app_env != "test"
+            ):
 
-        logger.info("DishCare AI stopped")
+                from langgraph.checkpoint.sqlite.aio import (
+                    AsyncSqliteSaver,
+                )
+
+                from app.agents.graph import build_graph
+                from app.agents.memory import ChatEngine
+                from app.llm.provider import LLMProvider
+                from app.rag.vector_store import KnowledgeBase
+                from app.services.business import BusinessService
+                from app.tools.executor import ToolExecutor
+
+                llm = LLMProvider(
+                    runtime_settings
+                )
+
+                stack.push_async_callback(
+                    llm.close
+                )
+
+                knowledge = await asyncio.to_thread(
+                    KnowledgeBase,
+                    runtime_settings,
+                )
+
+                stack.push_async_callback(
+                    asyncio.to_thread,
+                    knowledge.close,
+                )
+
+                await asyncio.to_thread(
+                    knowledge.initialize
+                )
+
+                runtime_settings.checkpoint_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                checkpointer = (
+                    await stack.enter_async_context(
+                        AsyncSqliteSaver.from_conn_string(
+                            str(
+                                runtime_settings.checkpoint_path
+                            )
+                        )
+                    )
+                )
+
+                executor = ToolExecutor(
+                    BusinessService(db)
+                )
+
+                graph = build_graph(
+                    settings=runtime_settings,
+                    llm=llm,
+                    executor=executor,
+                    knowledge=knowledge,
+                    checkpointer=checkpointer,
+                )
+
+                app.state.chat_engine = ChatEngine(
+                    graph
+                )
+
+                logger.info(
+                    "Agentic AI initialized"
+                )
+
+            logger.info(
+                "DishCare AI initialized"
+            )
+
+            yield
+
+        logger.info(
+            "DishCare AI stopped"
+        )
 
     app = FastAPI(
         title="DishCare AI",
         description=(
-            "Authenticated AI-ready customer support "
+            "Multilingual agentic customer support "
             "backend for a simulated DTH provider"
         ),
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
@@ -125,13 +213,20 @@ def create_app(
 
         return {
             "status": "ok",
-            "service": request.app.state.settings.app_name,
-            "version": "0.1.0",
+            "service": (
+                request.app.state.settings.app_name
+            ),
+            "version": "0.2.0",
             "database": "connected",
+            "ai_enabled": (
+                request.app.state.chat_engine
+                is not None
+            ),
         }
 
     app.include_router(auth_router)
     app.include_router(business_router)
+    app.include_router(chat_router)
 
     return app
 
