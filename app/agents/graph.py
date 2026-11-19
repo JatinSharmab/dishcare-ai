@@ -45,6 +45,8 @@ def build_graph(
     executor: ToolExecutor,
     knowledge: KnowledgeBase,
     checkpointer,
+    operations=None,
+    technician=None,
 ):
 
     agents = SpecializedAgents(
@@ -52,6 +54,8 @@ def build_graph(
         executor=executor,
         knowledge=knowledge,
         settings=settings,
+        operations=operations,
+        technician=technician,
     )
 
     builder = StateGraph(AgentState)

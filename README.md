@@ -119,3 +119,26 @@ The application is a single-process local MVP using simulated business infrastru
 ## Security
 
 API keys, JWT secrets, local databases, conversation checkpoints and downloaded model files must never be committed to GitHub.
+
+## Phase 3 reliability and integrations
+
+- Technician bookings accept an explicit `Idempotency-Key`. The HTTPX client retries transient failures with jitter, bounds each attempt, and opens a circuit after repeated outages. The local upstream simulator can time out after committing. Retrying the same key returns the original booking.
+- Payment webhooks verify an HMAC SHA-256 signature over the original request bytes. Event deduplication, payment updates, and the audit entry share a SQLite transaction.
+- Chat writes require the existing confirmation flow. A database transaction binds an approved write to its confirmation key and checks the quoted price. Customer identity comes from authentication, and tool arguments are validated independently of model output.
+- Prompt screening catches common injection phrases. The LLM boundary redacts common identifiers and credential formats. Audit entries store action, outcome, request ID and a pseudonymous actor reference.
+
+### Run the failure scenarios
+
+```powershell
+python -m pytest tests/test_reliability.py tests/test_webhooks.py tests/test_security.py -q
+```
+
+The tests reproduce a timeout after commit, a circuit opening, concurrent duplicate bookings, duplicate and conflicting payments, a rate limit, and invalid credentials.
+
+### MCP
+
+Install `requirements-reliability.txt`. Start DishCare, place an existing customer JWT in the current shell as `DISHCARE_CUSTOMER_TOKEN`, and run `python -m app.integrations.mcp_client get_balance`. The stdio server exposes balance and subscription queries under the JWT identity.
+
+### WhatsApp and payments
+
+Set the variables in `.env.example` using local secrets. The payment webhook is `POST /api/v1/webhooks/payments` and takes an event ID and an existing payment ID. For WhatsApp, configure Meta to call `/api/v1/webhooks/whatsapp`. The sender must match an enabled customer's E.164 number in the database. Use synthetic data for demos. Without a Meta access token, inbound events run through chat in simulation mode. An interrupted external delivery is recorded as uncertain and can be reconciled before a resend. Live Meta delivery requires a configured app and public HTTPS endpoint.

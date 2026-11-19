@@ -9,7 +9,6 @@ from app.schemas.conversation import (
     ChatResponse,
 )
 
-
 router = APIRouter(
     prefix="/api/v1/chat",
     tags=["Agentic AI"],

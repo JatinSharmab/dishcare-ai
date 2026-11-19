@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Request
 
 from app.core.security import require_customer
 from app.db.database import Database, get_db
@@ -279,11 +279,13 @@ async def get_complaint(
 async def book_technician(
     payload: TechnicianRequest,
     customer_id: CustomerID,
-    service: Service,
+    request: Request,
+    key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
-    return await service.book_technician(
-        customer_id,
-        payload,
+    from uuid import uuid4
+
+    return await request.app.state.technician_client.book(
+        customer_id, payload.model_dump(mode="json"), key if key is not None else uuid4().hex,
     )
 
 

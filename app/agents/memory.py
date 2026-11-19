@@ -1,6 +1,7 @@
 import asyncio
 from uuid import UUID, uuid4
 
+from app.core.safeguards import detects_injection
 from app.schemas.conversation import ChatResponse
 
 
@@ -14,7 +15,7 @@ class ChatEngine:
         self.graph = graph
 
         # Single-process concurrency protection.
-        self.lock = asyncio.Lock()
+        self.locks = [asyncio.Lock() for _ in range(64)]
 
     async def chat(
         self,
@@ -24,6 +25,14 @@ class ChatEngine:
     ) -> ChatResponse:
 
         session_id = session_id or uuid4()
+
+        if detects_injection(message):
+            return ChatResponse(
+                session_id=session_id,
+                answer="I can help with authorized DishCare account and support requests.",
+                intents=[], language="english", sources=[], tool_results=[],
+                pending_confirmation=None,
+            )
 
         thread_id = (
             f"{customer_id}:{session_id}"
@@ -36,7 +45,7 @@ class ChatEngine:
             "recursion_limit": 15,
         }
 
-        async with self.lock:
+        async with self.locks[hash(thread_id) % len(self.locks)]:
 
             result = await self.graph.ainvoke(
                 {

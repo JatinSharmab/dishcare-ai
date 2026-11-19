@@ -5,6 +5,7 @@ import time
 from app.agents.state import AgentState
 from app.config import Settings
 from app.core.exceptions import BusinessError
+from app.core.idempotency import confirmation_key
 from app.llm.provider import LLMProvider
 from app.prompts.loader import load_prompt
 from app.rag.vector_store import KnowledgeBase
@@ -20,12 +21,16 @@ class SpecializedAgents:
         executor: ToolExecutor,
         knowledge: KnowledgeBase,
         settings: Settings,
+        operations=None,
+        technician=None,
     ):
 
         self.llm = llm
         self.executor = executor
         self.knowledge = knowledge
         self.settings = settings
+        self.operations = operations
+        self.technician = technician
 
     def advance(
         self,
@@ -543,12 +548,23 @@ class SpecializedAgents:
         name = action["tool"]
         arguments = action["arguments"]
 
-        result = await self.executor.execute(
-            state["customer_id"],
-            name,
-            arguments,
-            allow_write=True,
-        )
+        customer_id = state["customer_id"]
+        if self.operations is None:
+            result = await self.executor.execute(customer_id, name, arguments, allow_write=True)
+        else:
+            key = confirmation_key(customer_id, state["session_id"], action["code"])
+            try:
+                if name == "book_technician" and self.technician is not None:
+                    data = await self.technician.book(customer_id, arguments, key)
+                    result = {"tool": name, "ok": True, "data": data}
+                else:
+                    result = await self.operations.execute(
+                        customer_id, key, name, arguments, action.get("new_monthly_fee_paise"),
+                    )
+            except BusinessError as exc:
+                result = {"tool": name, "ok": False, "error": {"code": exc.code, "message": exc.message}}
+                if exc.code in {"BOOKING_UNCERTAIN", "CIRCUIT_OPEN", "RECOVERY_IN_PROGRESS"}:
+                    updates["pending_confirmation"] = action
 
         result["verified"] = False
 
@@ -573,7 +589,8 @@ class SpecializedAgents:
 
         updates["tool_results"].append(result)
 
-        updates["pending_confirmation"] = None
+        if result["ok"]:
+            updates["pending_confirmation"] = None
         updates["confirmed_action"] = None
 
         return updates
