@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP_ENV: test
+      AI_ENABLED: "false"
+      VOICE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ai.txt
+            requirements-reliability.txt
+            requirements-dev.txt
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt -r requirements-ai.txt -r requirements-reliability.txt -r requirements-dev.txt
+      - name: Lint
+        run: python -m ruff check app tests evaluations scripts
+      - name: Test
+        run: python -m pytest -q
+      - name: Replay golden cases
+        run: python -m evaluations.runner --require-pass

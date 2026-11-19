@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from test_business import auth_headers, client
+from conftest import auth_headers
 
 BASE = "/api/v1/customers/CUST001/technicians"
 

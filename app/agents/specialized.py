@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 import time
@@ -327,23 +328,14 @@ class SpecializedAgents:
 
         else:
 
-            await self.read_tool(
-                state,
-                updates,
-                "get_payments",
+            customer_id = state["customer_id"]
+            payments, subscription, documents = await asyncio.gather(
+                self.executor.execute(customer_id, "get_payments", {}),
+                self.executor.execute(customer_id, "get_subscription", {}),
+                self.knowledge.retrieve(state["message"] + " recharge payment subscription activation policy"),
             )
-
-            await self.read_tool(
-                state,
-                updates,
-                "get_subscription",
-            )
-
-            await self.retrieve(
-                state,
-                updates,
-                "recharge payment subscription activation policy",
-            )
+            updates["tool_results"].extend((payments, subscription))
+            updates["documents"].extend(documents)
 
         return updates
 

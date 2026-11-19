@@ -8,6 +8,7 @@ from groq import AsyncGroq
 
 from app.config import Settings
 from app.core.exceptions import BusinessError
+from app.monitoring.usage import record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class LLMProvider:
                     ),
                 )
             )
+            record_usage("gemini", self.settings.gemini_model, response)
 
             return schema.model_validate_json(
                 response.text or ""
@@ -152,6 +154,7 @@ class LLMProvider:
                     },
                 )
             )
+            record_usage("groq", self.settings.groq_model, response)
 
             content = (
                 response.choices[0].message.content
@@ -184,6 +187,7 @@ class LLMProvider:
                     ),
                 )
             )
+            record_usage("gemini", self.settings.gemini_model, response)
 
             if not response.text:
                 raise ValueError("Empty Gemini response")
@@ -208,6 +212,7 @@ class LLMProvider:
                     max_completion_tokens=1500,
                 )
             )
+            record_usage("groq", self.settings.groq_model, response)
 
             content = (
                 response.choices[0].message.content
@@ -260,6 +265,7 @@ class LLMProvider:
                     ),
                 )
             )
+            record_usage("gemini", self.settings.gemini_model, response)
 
             calls = response.function_calls or []
 
@@ -306,6 +312,7 @@ class LLMProvider:
                     parallel_tool_calls=False,
                 )
             )
+            record_usage("groq", self.settings.groq_model, response)
 
             calls = (
                 response.choices[0].message.tool_calls

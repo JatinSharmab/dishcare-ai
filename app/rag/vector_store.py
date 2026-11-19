@@ -1,5 +1,7 @@
 import asyncio
 import threading
+from collections import OrderedDict
+from hashlib import sha256
 from pathlib import Path
 
 from qdrant_client import QdrantClient, models
@@ -36,6 +38,7 @@ class KnowledgeBase:
         )
 
         self.lock = threading.Lock()
+        self.query_cache = OrderedDict()
 
     def initialize(self):
 
@@ -50,6 +53,7 @@ class KnowledgeBase:
             )
 
         with self.lock:
+            self.query_cache.clear()
 
             if self.client.collection_exists(
                 COLLECTION
@@ -102,11 +106,13 @@ class KnowledgeBase:
         query: str,
     ) -> list[dict]:
 
+        cache_key = sha256(query.encode()).digest()
         with self.lock:
-
-            vector = self.embedding.embed(
-                [query]
-            )[0]
+            cached = self.query_cache.get(cache_key)
+            if cached is not None:
+                self.query_cache.move_to_end(cache_key)
+                return [item.copy() for item in cached]
+            vector = self.embedding.embed([query])[0]
 
             response = self.client.query_points(
                 collection_name=COLLECTION,
@@ -116,7 +122,7 @@ class KnowledgeBase:
                 with_payload=True,
             )
 
-            return [
+            documents = [
                 {
                     "source": point.payload["source"],
                     "text": point.payload["text"],
@@ -124,6 +130,10 @@ class KnowledgeBase:
                 }
                 for point in response.points
             ]
+            self.query_cache[cache_key] = documents
+            if len(self.query_cache) > 128:
+                self.query_cache.popitem(last=False)
+            return [item.copy() for item in documents]
 
     async def retrieve(
         self,

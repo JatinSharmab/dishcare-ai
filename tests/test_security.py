@@ -1,4 +1,4 @@
-from test_business import auth_headers, client
+from conftest import auth_headers
 
 from app.core.safeguards import detects_injection, redact_sensitive_text
 

@@ -48,6 +48,13 @@ class Settings(BaseSettings):
         le=120,
     )
 
+    voice_enabled: bool = False
+    whisper_model: str = "base"
+    piper_english_model: Path = Path("models/en_US-lessac-medium.onnx")
+    piper_hindi_model: Path = Path("models/hi_IN-pratham-medium.onnx")
+    metrics_key: SecretStr = SecretStr("")
+    llm_prices_per_million: dict[str, tuple[float, float]] = Field(default_factory=dict)
+
     # RAG configuration
 
     embedding_model: str = (

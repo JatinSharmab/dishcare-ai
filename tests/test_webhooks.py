@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 from pydantic import SecretStr
-from test_business import client
 
 
 def post_event(client, path, event, secret):

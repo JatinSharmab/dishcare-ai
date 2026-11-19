@@ -75,10 +75,12 @@ async def get_current_customer(
     db: Annotated[Database, Depends(get_db)],
 ) -> str:
 
+    return await authenticate_customer(token, request.app.state.settings, db)
+
+
+async def authenticate_customer(token: str | None, settings: Settings, db: Database) -> str:
     if not token:
         raise unauthorized()
-
-    settings = request.app.state.settings
 
     try:
         payload = jwt.decode(

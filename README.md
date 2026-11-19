@@ -142,3 +142,39 @@ Install `requirements-reliability.txt`. Start DishCare, place an existing custom
 ### WhatsApp and payments
 
 Set the variables in `.env.example` using local secrets. The payment webhook is `POST /api/v1/webhooks/payments` and takes an event ID and an existing payment ID. For WhatsApp, configure Meta to call `/api/v1/webhooks/whatsapp`. The sender must match an enabled customer's E.164 number in the database. Use synthetic data for demos. Without a Meta access token, inbound events run through chat in simulation mode. An interrupted external delivery is recorded as uncertain and can be reconciled before a resend. Live Meta delivery requires a configured app and public HTTPS endpoint.
+
+## Phase 4 voice, evaluation and monitoring
+
+Use Python 3.11 and install the optional Voice AI packages in the project environment.
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-ai.txt -r requirements-voice.txt
+python -m piper.download_voices --data-dir models en_US-lessac-medium hi_IN-pratham-medium
+```
+
+Set `AI_ENABLED=true` and `VOICE_ENABLED=true` in `.env`, and configure Gemini or Groq. Faster Whisper loads the multilingual `base` model on CPU and downloads it on first use if it is absent from cache. Set `WHISPER_MODEL` to a downloaded local model directory for offline startup. Start Uvicorn with one worker. Set `DISHCARE_CUSTOMER_TOKEN` in the shell to a customer JWT from `/api/v1/auth/token`.
+
+```powershell
+python -m scripts.voice_client --language en
+python -m scripts.voice_client --language hi
+python -m scripts.voice_client --wav models/question-16k.wav --output reply.wav
+```
+
+Wear headphones to avoid feeding playback back into the microphone. Omit `--language` for Whisper language detection. Press Space on Windows or Enter on Unix to interrupt. The client displays the session ID for follow-up text or a typed confirmation. The WAV client expects mono 16 kHz PCM16 input.
+
+```powershell
+python -m pytest -q
+python -m ruff check app tests evaluations scripts
+python -m evaluations.runner --require-pass
+python -m evaluations.runner --live --judge --case balance-en
+python -m evaluations.prompt_comparison --simulate-regression
+python -m evaluations.voice_eval models/voice-manifest.json
+```
+
+The offline evaluation replays controlled decisions through the real graph and SQLite. The live flag uses configured model credentials, and the judge checks relevance, evidence and unsupported claims. Voice evaluation expects a JSON array of objects with `wav`, `reference` and optional `language`. Each WAV path is relative to the manifest. Set `METRICS_KEY` to enable `GET /metrics`. Set `LLM_PRICES_PER_MILLION` to a JSON map of model IDs to `[input_usd, output_usd]` for estimated request costs.
+
+- [Architecture](docs/architecture.md)
+- [API and demo walkthrough](docs/api.md)
+- [Reliability notes](docs/reliability.md)
+- [Measured evaluation results](docs/evaluation_results.md)
+- [Interview guide](docs/interview_guide.md)

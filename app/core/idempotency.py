@@ -207,15 +207,8 @@ class OperationStore:
                     name,
                     arguments,
                     allow_write=True,
+                    raise_errors=True,
                 )
-
-                if not result["ok"]:
-
-                    raise BusinessError(
-                        409,
-                        result["error"]["code"],
-                        result["error"]["message"],
-                    )
 
                 # Prevent execution at a changed price.
                 if expected_fee is not None:

@@ -18,6 +18,9 @@ from app.api.mcp import router as mcp_router
 from app.api.technicians import router as technicians_router
 from app.api.webhooks import router as webhook_router
 from app.api.whatsapp import router as whatsapp_router
+from app.api.voice import router as voice_router
+from app.monitoring.metrics import Metrics
+from app.monitoring.tracing import build_tracing_middleware
 from app.config import Settings
 from app.core.exceptions import BusinessError
 from app.core.idempotency import OperationStore
@@ -40,6 +43,8 @@ def create_app(
 ) -> FastAPI:
 
     reliability = ReliabilitySettings()
+    metrics = Metrics()
+    limiter = FixedWindowLimiter()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -71,6 +76,10 @@ def create_app(
 
         async with AsyncExitStack() as stack:
             app.state.reliability = reliability
+            app.state.limiter = limiter
+            app.state.metrics = metrics
+            app.state.voice_pipeline = None
+            app.state.voice_connections = asyncio.Semaphore(8)
             app.state.operations = OperationStore(db)
             app.state.executor = ToolExecutor(BusinessService(db))
             app.state.service_key = reliability.internal_service_key.get_secret_value() or secrets.token_urlsafe(32)
@@ -169,9 +178,21 @@ def create_app(
                     "Agentic AI initialized"
                 )
 
-            logger.info(
-                "DishCare AI initialized"
-            )
+            if runtime_settings.voice_enabled and runtime_settings.app_env != "test":
+                if app.state.chat_engine is None:
+                    raise RuntimeError("VOICE_ENABLED requires AI_ENABLED")
+                from app.voice.asr import WhisperASR
+                from app.voice.pipeline import VoicePipeline
+                from app.voice.tts import PiperTTS
+                from app.voice.vad import SileroVAD
+
+                asr = await asyncio.to_thread(WhisperASR, runtime_settings.whisper_model)
+                tts = await asyncio.to_thread(
+                    PiperTTS, runtime_settings.piper_english_model, runtime_settings.piper_hindi_model,
+                )
+                app.state.voice_pipeline = VoicePipeline(asr, tts, SileroVAD, metrics)
+
+            logger.info("DishCare AI initialized")
 
             yield
 
@@ -185,7 +206,7 @@ def create_app(
             "Multilingual agentic customer support "
             "backend for a simulated DTH provider"
         ),
-        version="0.2.0",
+        version="1.0.0",
         lifespan=lifespan,
     )
 
@@ -257,13 +278,24 @@ def create_app(
             "service": (
                 request.app.state.settings.app_name
             ),
-            "version": "0.2.0",
+            "version": app.version,
+            "voice_enabled": request.app.state.voice_pipeline is not None,
             "database": "connected",
             "ai_enabled": (
                 request.app.state.chat_engine
                 is not None
             ),
         }
+
+    @app.get("/metrics", tags=["System"])
+    async def local_metrics(request: Request):
+        import hmac
+
+        expected = request.app.state.settings.metrics_key.get_secret_value()
+        supplied = request.headers.get("X-Metrics-Key", "")
+        if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
+            raise BusinessError(404, "METRICS_UNAVAILABLE", "Metrics are unavailable")
+        return metrics.snapshot()
 
     app.include_router(auth_router)
     app.include_router(business_router)
@@ -272,7 +304,11 @@ def create_app(
     app.include_router(webhook_router)
     app.include_router(whatsapp_router)
     app.include_router(mcp_router)
-    app.middleware("http")(build_rate_limit_middleware(FixedWindowLimiter(), reliability))
+    app.include_router(voice_router)
+    app.middleware("http")(build_rate_limit_middleware(limiter, reliability))
+    app.middleware("http")(build_tracing_middleware(
+        metrics, lambda request: request.app.state.settings.llm_prices_per_million,
+    ))
 
     return app
 

@@ -53,6 +53,7 @@ class ToolExecutor:
         arguments: dict,
         *,
         allow_write: bool = False,
+        raise_errors: bool = False,
     ) -> dict:
 
         try:
@@ -127,6 +128,8 @@ class ToolExecutor:
             }
 
         except BusinessError as exc:
+            if raise_errors:
+                raise
 
             return {
                 "tool": name,
